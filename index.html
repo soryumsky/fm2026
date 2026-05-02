@@ -1157,7 +1157,8 @@ function getPlayerPosition() {
   return idx >= 0 ? idx + 1 : 1;
 }
 
-// FIX #3: Goals assigned from actual club squad members
+// FIX #3: Goals assigned from actual club squad members.
+// Returns array of scorer names IN ORDER so live events can display the exact same names.
 function assignGoals(club, goals) {
   // Get the real lineup for this club
   let lineup;
@@ -1172,12 +1173,16 @@ function assignGoals(club, goals) {
       .filter(Boolean);
   }
 
-  if (!lineup.length || !goals) return;
+  const scorerNames = []; // <-- will be returned so live display uses SAME names
+
+  if (!lineup.length || !goals) return scorerNames;
 
   for (let i = 0; i < goals; i++) {
     const scorer = pick(lineup);
     const others = lineup.filter(p => p.id !== scorer.id);
     const assister = others.length ? pick(others) : scorer;
+
+    scorerNames.push(scorer.name); // record who scored this goal
 
     if (!G.seasonStats.scorers) G.seasonStats.scorers = {};
     if (!G.seasonStats.assists) G.seasonStats.assists = {};
@@ -1203,6 +1208,8 @@ function assignGoals(club, goals) {
       }
     }
   }
+
+  return scorerNames; // EXACT list of who scored, in order
 }
 
 /* ============================================================
@@ -1393,17 +1400,11 @@ function playWeek() {
     playerMatch.awayGoals = awayGoals;
     playerMatch.played = true;
 
-    // Assign goals using actual squad players
-    assignGoals(isHome ? playerClub : oppClub, homeGoals);
-    assignGoals(isHome ? oppClub : playerClub, awayGoals);
-
-    // Build the live scorers list from actual squad members
-    const playerGoals = isHome ? homeGoals : awayGoals;
-    const oppGoals = isHome ? awayGoals : homeGoals;
-
-    // Get names from actual lineups for live display
-    const playerLineupNames = validLineup.slice(0,5).map(id => G.squad.find(p=>p.id===id)).filter(Boolean).map(p=>p.name);
-    const oppLineup = [...oppClub.squad].sort((a,b)=>b.rating-a.rating).slice(0,5).map(p=>p.name);
+    // assignGoals returns exact scorer names in order — use these for live display
+    const homeClubForGoals = isHome ? playerClub : oppClub;
+    const awayClubForGoals = isHome ? oppClub : playerClub;
+    const homeScorerNames = assignGoals(homeClubForGoals, homeGoals);
+    const awayScorerNames = assignGoals(awayClubForGoals, awayGoals);
 
     showLiveMatch({
       compType: 'League · Week ' + nextWeek,
@@ -1414,8 +1415,8 @@ function playWeek() {
       homeGoals,
       awayGoals,
       isPlayerHome: isHome,
-      homeScorers: isHome ? playerLineupNames : oppLineup,
-      awayScorers: isHome ? oppLineup : playerLineupNames,
+      homeScorers: homeScorerNames,
+      awayScorers: awayScorerNames,
       otherResults,
       onFinish: () => {
         const pGoals = isHome ? homeGoals : awayGoals;
@@ -1541,7 +1542,8 @@ function showLiveMatch({ compType, homeName, homeLogo, awayName, awayLogo, homeG
   liveMatchTimer = setTimeout(tick, 600);
 }
 
-// FIX #3: Generate events using real player names from lineup
+// homeScorers / awayScorers = exact list of names who scored, returned by assignGoals, in order.
+// We just assign them to random minutes — the name itself is already fixed.
 function generateLiveEvents(homeGoals, awayGoals, homeScorers, awayScorers) {
   const events = [];
   const usedMinutes = new Set();
@@ -1551,13 +1553,12 @@ function generateLiveEvents(homeGoals, awayGoals, homeScorers, awayScorers) {
     usedMinutes.add(m);
     return m;
   }
+  // Use the scorer names sequentially — they are already the correct players
   for (let i = 0; i < homeGoals; i++) {
-    const scorer = homeScorers.length ? pick(homeScorers) : 'Unknown';
-    events.push({ type: 'goal', team: 'home', minute: getMinute(), scorer });
+    events.push({ type: 'goal', team: 'home', minute: getMinute(), scorer: homeScorers[i] || '?' });
   }
   for (let i = 0; i < awayGoals; i++) {
-    const scorer = awayScorers.length ? pick(awayScorers) : 'Unknown';
-    events.push({ type: 'goal', team: 'away', minute: getMinute(), scorer });
+    events.push({ type: 'goal', team: 'away', minute: getMinute(), scorer: awayScorers[i] || '?' });
   }
   return events.sort((a, b) => a.minute - b.minute);
 }
