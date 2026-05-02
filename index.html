@@ -723,22 +723,21 @@ body {
 
   <!-- SETUP -->
   <div class="screen" id="screen-setup">
-    <div class="header"><h1>🆕 Create Your Club</h1></div>
+    <div class="header"><h1>⚽ New Manager</h1></div>
     <div class="scroll-area">
       <div class="form-group">
         <label class="form-label">Manager Name</label>
         <input type="text" class="form-input" id="managerName" placeholder="Your name" maxlength="24">
       </div>
-      <div class="form-group">
-        <label class="form-label">Club Name</label>
-        <input type="text" class="form-input" id="clubName" placeholder="Your club name" maxlength="24">
+      <div class="form-group" style="margin-top:4px">
+        <label class="form-label">Choose Your Club</label>
+        <p style="font-size:11px;color:var(--text2);margin-bottom:12px">You will manage this club against the other 9 elite teams</p>
+        <div id="clubPickGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Choose Club Logo</label>
-        <div class="logo-grid" id="logoGrid"></div>
+      <div style="margin-top:8px">
+        <button class="btn btn-primary" onclick="createClub()">⚡ Start Season</button>
       </div>
-      <button class="btn btn-primary" onclick="createClub()">⚡ Start Season</button>
-      <br><br>
+      <br>
       <button class="btn btn-ghost w-full" onclick="showScreen('screen-menu')">← Back</button>
     </div>
   </div>
@@ -865,8 +864,29 @@ body {
    CONSTANTS
    ============================================================ */
 const LOGOS = ['🦁','🐯','🦊','🐺','🦅','🐉','🦋','🦈','🐻','🦌','🦏','🐘','🦓','🦒','🦚'];
-const AI_PREFIXES = ['FC','United','City','Athletic','Real','Sporting','Dynamo','Rangers','Rovers','Town'];
-const AI_SUFFIXES = ['Lions','Eagles','Wolves','Tigers','Bears','Foxes','Hawks','Dragons','Stars','Knights'];
+
+// Real AI clubs with names and img/ logos
+const AI_CLUBS_DATA = [
+  { id: 'ai1',  name: 'Arsenal',           logo: 'img/arsenal',          emoji: '🔴' },
+  { id: 'ai2',  name: 'Manchester United', logo: 'img/mu', emoji: '🔴' },
+  { id: 'ai3',  name: 'Chelsea',           logo: 'img/chelsea',           emoji: '🔵' },
+  { id: 'ai4',  name: 'Liverpool',         logo: 'img/liverpool',         emoji: '🔴' },
+  { id: 'ai5',  name: 'Real Madrid',       logo: 'img/madrid',       emoji: '⚪' },
+  { id: 'ai6',  name: 'Barcelona',         logo: 'img/barcelona',         emoji: '🔵' },
+  { id: 'ai7',  name: 'Bayern München',    logo: 'img/munchen',     emoji: '🔴' },
+  { id: 'ai8',  name: 'AC Milan',          logo: 'img/acmilan',          emoji: '🔴' },
+  { id: 'ai9',  name: 'Inter Milan',       logo: 'img/inter',       emoji: '🔵' },
+  { id: 'ai10', name: 'Manchester City',   logo: 'img/city',   emoji: '🔵' }
+];
+
+// Helper: render club logo — tries <img>, falls back to emoji
+function clubLogoHTML(logoPath, emoji, size = 32, borderRadius = 6) {
+  return `<img src="${logoPath}.png" onerror="this.outerHTML='<span style=\\'font-size:${Math.round(size*0.8)}px\\'>${emoji}</span>'"
+    style="width:${size}px;height:${size}px;object-fit:contain;border-radius:${borderRadius}px;flex-shrink:0" alt="logo">`;
+}
+
+// Expose helper so HTML inline onerror works
+window._clubLogoHTML = clubLogoHTML;
 
 const TIERS = {
   D: { color: 'var(--tier-d)', bg: 'rgba(107,114,128,0.2)', range: [40,55] },
@@ -1011,12 +1031,19 @@ function gachaPull(packType) {
    FIX #7: AI lineup = best 5 by rating
    FIX #4: Improved match calculation
    ============================================================ */
-function generateAIClub(id, logo) {
-  const name = pick(AI_PREFIXES) + ' ' + pick(AI_SUFFIXES);
+function generateAIClub(clubData) {
   const squad = [];
-  // Generate 8 players per AI club — varied tiers
   for (let i = 0; i < 8; i++) squad.push(generatePlayer(null));
-  return { id, name, logo, squad, isAI: true };
+  return { id: clubData.id, name: clubData.name, logo: clubData.logo, emoji: clubData.emoji, squad, isAI: true };
+}
+
+// Helper to get logo display for a club
+function getClubLogoDisplay(club, size) {
+  size = size || 32;
+  if (club && (club.isAI || club.isRealClub)) {
+    return clubLogoHTML(club.logo, club.emoji || '⚽', size);
+  }
+  return `<span style="font-size:${Math.round(size*0.8)}px">${(club && club.logo) || '⚽'}</span>`;
 }
 
 // FIX #7: AI always uses top 5 players by rating as starting lineup
@@ -1074,7 +1101,7 @@ function simulateMatchResult(homeClub, awayClub) {
    LEAGUE SYSTEM
    ============================================================ */
 function getPlayerClub() {
-  return { id: 'player', name: G.manager.clubName, logo: G.manager.logo, squad: G.squad, isAI: false };
+  return { id: 'player', name: G.manager.clubName, logo: G.manager.logo, emoji: G.manager.emoji || '', isAI: false, isRealClub: !!G.manager.isRealClub, squad: G.squad };
 }
 
 function getAllClubs() {
@@ -1135,7 +1162,7 @@ function getTableStats() {
   const clubs = getAllClubs();
   const stats = {};
   clubs.forEach(c => {
-    stats[c.id] = { id: c.id, name: c.name, logo: c.logo, P: 0, W: 0, D: 0, L: 0, GF: 0, GA: 0, GD: 0, Pts: 0 };
+    stats[c.id] = { id: c.id, name: c.name, logo: c.logo, emoji: c.emoji || '', isAI: !!c.isAI, isRealClub: !!c.isRealClub, P: 0, W: 0, D: 0, L: 0, GF: 0, GA: 0, GD: 0, Pts: 0 };
   });
   G.leagueMatches.filter(m => m.played).forEach(m => {
     const h = stats[m.home], a = stats[m.away];
@@ -1158,7 +1185,19 @@ function getPlayerPosition() {
 }
 
 // FIX #3: Goals assigned from actual club squad members.
-// Returns array of scorer names IN ORDER so live events can display the exact same names.
+// Higher-tier players are weighted to score/assist more often.
+function weightedPickByRating(lineup) {
+  // Weight = rating^2 so S-tier is MUCH more likely to score than D-tier
+  const weights = lineup.map(p => p.rating * p.rating);
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < lineup.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return lineup[i];
+  }
+  return lineup[lineup.length - 1];
+}
+
 function assignGoals(club, goals) {
   // Get the real lineup for this club
   let lineup;
@@ -1173,16 +1212,18 @@ function assignGoals(club, goals) {
       .filter(Boolean);
   }
 
-  const scorerNames = []; // <-- will be returned so live display uses SAME names
+  const scorerNames = []; // returned so live display uses SAME names
 
   if (!lineup.length || !goals) return scorerNames;
 
   for (let i = 0; i < goals; i++) {
-    const scorer = pick(lineup);
+    // Weighted pick — higher rated players score more
+    const scorer = weightedPickByRating(lineup);
     const others = lineup.filter(p => p.id !== scorer.id);
-    const assister = others.length ? pick(others) : scorer;
+    // Assister also weighted, from remaining players
+    const assister = others.length ? weightedPickByRating(others) : scorer;
 
-    scorerNames.push(scorer.name); // record who scored this goal
+    scorerNames.push(scorer.name);
 
     if (!G.seasonStats.scorers) G.seasonStats.scorers = {};
     if (!G.seasonStats.assists) G.seasonStats.assists = {};
@@ -1209,7 +1250,7 @@ function assignGoals(club, goals) {
     }
   }
 
-  return scorerNames; // EXACT list of who scored, in order
+  return scorerNames;
 }
 
 /* ============================================================
@@ -1222,7 +1263,7 @@ function getNextPlayerFixture() {
 /* ============================================================
    GAME CREATION
    ============================================================ */
-function startNewGame() { showScreen('screen-setup'); renderLogoGrid(); }
+function startNewGame() { selectedClubIdx = -1; showScreen('screen-setup'); renderClubPickGrid(); }
 
 function loadGame() {
   try {
@@ -1230,9 +1271,19 @@ function loadGame() {
     if (saved) {
       G = JSON.parse(saved);
       if (!G.seasonStats) G.seasonStats = { scorers: {}, assists: {} };
-      // Migrate: remove position field from existing players
       if (G.squad) G.squad.forEach(p => { delete p.position; });
-      if (G.aiClubs) G.aiClubs.forEach(c => c.squad.forEach(p => { delete p.position; }));
+      // Migrate old saves: if manager has no isRealClub but logo matches a real club
+      if (!G.manager.isRealClub) {
+        const match = AI_CLUBS_DATA.find(d => d.name === G.manager.clubName);
+        if (match) { G.manager.logo = match.logo; G.manager.emoji = match.emoji; G.manager.isRealClub = true; }
+      }
+      if (G.aiClubs) {
+        G.aiClubs.forEach(c => {
+          const original = AI_CLUBS_DATA.find(d => d.id === c.id);
+          if (original) { c.name = original.name; c.logo = original.logo; c.emoji = original.emoji; c.isAI = true; }
+          c.squad.forEach(p => { delete p.position; });
+        });
+      }
       showScreen('screen-dashboard');
       updateDashboard();
       notify('Game loaded! ⚽', 'success');
@@ -1248,6 +1299,28 @@ function renderLogoGrid() {
 }
 
 let selectedLogo = LOGOS[0];
+let selectedClubIdx = -1; // -1 = none selected yet (not required, just flavour)
+
+function renderClubPickGrid() {
+  const grid = document.getElementById('clubPickGrid');
+  if (!grid) return;
+  grid.innerHTML = AI_CLUBS_DATA.map((c, i) => `
+    <div class="club-pick-card${selectedClubIdx === i ? ' selected' : ''}" id="cpick-${i}" onclick="selectClubPick(${i})"
+      style="background:var(--card);border:2px solid ${selectedClubIdx===i?'var(--accent)':'var(--border)'};border-radius:10px;padding:10px;display:flex;align-items:center;gap:8px;cursor:pointer;transition:all 0.15s">
+      ${clubLogoHTML(c.logo, c.emoji, 36, 6)}
+      <div style="font-size:12px;font-weight:700;line-height:1.3">${c.name}</div>
+    </div>`).join('');
+}
+
+function selectClubPick(idx) {
+  selectedClubIdx = idx;
+  document.querySelectorAll('[id^="cpick-"]').forEach((el, i) => {
+    el.style.borderColor = i === idx ? 'var(--accent)' : 'var(--border)';
+    el.style.background = i === idx ? 'rgba(59,130,246,0.12)' : 'var(--card)';
+  });
+  notify(`${AI_CLUBS_DATA[idx].emoji} ${AI_CLUBS_DATA[idx].name} dipilih!`, 'success', 1800);
+}
+
 function selectLogo(el, logo) {
   document.querySelectorAll('.logo-option').forEach(e => e.classList.remove('selected'));
   el.classList.add('selected');
@@ -1256,23 +1329,20 @@ function selectLogo(el, logo) {
 
 function createClub() {
   const managerName = document.getElementById('managerName').value.trim();
-  const clubName = document.getElementById('clubName').value.trim();
-  if (!managerName) { notify('Enter your name!', 'error'); return; }
-  if (!clubName) { notify('Enter club name!', 'error'); return; }
+  if (!managerName) { notify('Masukkan nama manager dulu!', 'error'); return; }
+  if (selectedClubIdx < 0) { notify('Pilih salah satu club dulu!', 'error'); return; }
+
+  const chosenClub = AI_CLUBS_DATA[selectedClubIdx];
 
   usedPlayerNames = new Set();
   const starterSquad = generateStarterPack();
-  const aiClubs = [];
-  const usedLogos = [selectedLogo];
-  for (let i = 1; i <= 9; i++) {
-    let logo;
-    do { logo = pick(LOGOS); } while (usedLogos.includes(logo));
-    usedLogos.push(logo);
-    aiClubs.push(generateAIClub('ai' + i, logo));
-  }
+  // AI clubs = all clubs EXCEPT the one user picked
+  const aiClubs = AI_CLUBS_DATA
+    .filter((_, i) => i !== selectedClubIdx)
+    .map(d => generateAIClub(d));
 
   G = {
-    manager: { name: managerName, clubName, logo: selectedLogo },
+    manager: { name: managerName, clubName: chosenClub.name, logo: chosenClub.logo, emoji: chosenClub.emoji, isRealClub: true },
     gold: 1000,
     squad: starterSquad,
     lineup: starterSquad.map(p => p.id),
@@ -1381,7 +1451,10 @@ function playWeek() {
     m.played = true;
     assignGoals(hClub, homeGoals);
     assignGoals(aClub, awayGoals);
-    otherResults.push({ home: hClub.name, away: aClub.name, homeGoals, awayGoals, homeLogo: hClub.logo, awayLogo: aClub.logo });
+    otherResults.push({ home: hClub.name, away: aClub.name, homeGoals, awayGoals,
+      homeLogo: hClub.logo, awayLogo: aClub.logo,
+      homeIsAI: !!hClub.isAI, awayIsAI: !!aClub.isAI,
+      homeEmoji: hClub.emoji || '⚽', awayEmoji: aClub.emoji || '⚽' });
   });
 
   G.currentWeek = nextWeek;
@@ -1406,17 +1479,33 @@ function playWeek() {
     const homeScorerNames = assignGoals(homeClubForGoals, homeGoals);
     const awayScorerNames = assignGoals(awayClubForGoals, awayGoals);
 
+    // Build lineups for pre-match display
+    const homeLineupForDisplay = getLineup(isHome ? playerClub : oppClub);
+    const awayLineupForDisplay = getLineup(isHome ? oppClub : playerClub);
+    const homePowerVal = clubPower(isHome ? playerClub : oppClub);
+    const awayPowerVal = clubPower(isHome ? oppClub : playerClub);
+
     showLiveMatch({
       compType: 'League · Week ' + nextWeek,
       homeName: isHome ? G.manager.clubName : oppClub.name,
       homeLogo: isHome ? G.manager.logo : oppClub.logo,
+      homeIsAI: !isHome,
+      homeIsReal: isHome && !!G.manager.isRealClub,
+      homeEmoji: isHome ? (G.manager.emoji || '') : (oppClub.emoji || '⚽'),
       awayName: isHome ? oppClub.name : G.manager.clubName,
       awayLogo: isHome ? oppClub.logo : G.manager.logo,
+      awayIsAI: isHome,
+      awayIsReal: !isHome && !!G.manager.isRealClub,
+      awayEmoji: isHome ? (oppClub.emoji || '⚽') : (G.manager.emoji || ''),
       homeGoals,
       awayGoals,
       isPlayerHome: isHome,
       homeScorers: homeScorerNames,
       awayScorers: awayScorerNames,
+      homeLineup: homeLineupForDisplay,
+      awayLineup: awayLineupForDisplay,
+      homePower: homePowerVal,
+      awayPower: awayPowerVal,
       otherResults,
       onFinish: () => {
         const pGoals = isHome ? homeGoals : awayGoals;
@@ -1458,19 +1547,91 @@ function finishWeek() {
    LIVE MATCH DISPLAY
    FIX #3: Use real player names from lineup
    ============================================================ */
-function showLiveMatch({ compType, homeName, homeLogo, awayName, awayLogo, homeGoals, awayGoals, isPlayerHome, homeScorers, awayScorers, otherResults, onFinish }) {
+function showLiveMatch({ compType, homeName, homeLogo, homeIsAI, homeIsReal, homeEmoji, awayName, awayLogo, awayIsAI, awayIsReal, awayEmoji, homeGoals, awayGoals, isPlayerHome, homeScorers, awayScorers, homeLineup, awayLineup, homePower, awayPower, otherResults, onFinish }) {
   const overlay = document.getElementById('liveMatchOverlay');
+
+  // ── PRE-MATCH SCREEN ──────────────────────────────────────────
+  // Build lineup HTML helper
+  function lineupHTML(lineup, alignRight) {
+    if (!lineup || !lineup.length) return '<div style="font-size:11px;color:var(--text2)">—</div>';
+    return lineup.map(p => {
+      const tierColor = TIERS[p.tier] ? TIERS[p.tier].color : 'var(--text2)';
+      return `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);${alignRight?'flex-direction:row-reverse;text-align:right':''}">
+        <div style="width:22px;height:22px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;background:${TIERS[p.tier]?TIERS[p.tier].bg:'#333'};color:${tierColor};border:1px solid ${tierColor};flex-shrink:0">${p.tier}</div>
+        <div style="font-size:11px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</div>
+        <div style="font-size:11px;font-weight:900;color:${tierColor}">${p.rating}</div>
+      </div>`;
+    }).join('');
+  }
+
+  const homeLogoHTML = (homeIsAI || homeIsReal) ? clubLogoHTML(homeLogo, homeEmoji, 40, 8) : `<span style="font-size:36px">${homeLogo}</span>`;
+  const awayLogoHTML = (awayIsAI || awayIsReal) ? clubLogoHTML(awayLogo, awayEmoji, 40, 8) : `<span style="font-size:36px">${awayLogo}</span>`;
+
+  // Rating difference bar
+  const totalPow = (homePower || 1) + (awayPower || 1);
+  const homePct = Math.round((homePower / totalPow) * 100);
+  const awayPct = 100 - homePct;
+
   document.getElementById('liveMatchTitle').textContent = compType;
-  document.getElementById('liveHomeTeam').innerHTML = `${homeLogo}<br><span style="font-size:11px">${homeName}</span>`;
-  document.getElementById('liveAwayTeam').innerHTML = `${awayLogo}<br><span style="font-size:11px">${awayName}</span>`;
-  document.getElementById('liveScoreBox').textContent = '0 – 0';
-  document.getElementById('liveMinuteBox').innerHTML = '<span class="live-pulse"></span>0\'';
-  document.getElementById('liveEvents').innerHTML = '';
+  document.getElementById('liveHomeTeam').innerHTML = `${homeLogoHTML}<br><span style="font-size:11px">${homeName}</span>`;
+  document.getElementById('liveAwayTeam').innerHTML = `${awayLogoHTML}<br><span style="font-size:11px">${awayName}</span>`;
+  document.getElementById('liveScoreBox').textContent = '? – ?';
+  document.getElementById('liveScoreBox').style.color = 'var(--text2)';
+  document.getElementById('liveMinuteBox').innerHTML = '<span style="color:var(--gold2);font-size:11px">⏳ Pre-Match</span>';
   document.getElementById('liveOtherResults').style.display = 'none';
   document.getElementById('liveFinishBtn').style.display = 'none';
+  document.getElementById('liveFinishBtn').innerHTML = '';
   overlay.classList.add('active');
 
-  // FIX #3: Pass real player names to events
+  // Pre-match content in events area
+  const eventsContainer = document.getElementById('liveEvents');
+  eventsContainer.innerHTML = `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text2);text-align:center;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.5px">⚡ Team Power</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:22px;font-weight:900;color:var(--accent2)">${homePower}</div>
+        <div style="font-size:11px;color:var(--text2)">vs</div>
+        <div style="font-size:22px;font-weight:900;color:var(--purple)">${awayPower}</div>
+      </div>
+      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:2px">
+        <div style="width:${homePct}%;background:var(--accent);transition:width 0.5s"></div>
+        <div style="width:${awayPct}%;background:var(--purple)"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px">
+        <div style="font-size:10px;color:var(--accent2)">${homePct}%</div>
+        <div style="font-size:10px;color:var(--purple)">${awayPct}%</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px">
+        <div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:8px;text-transform:uppercase">🏠 ${homeName}</div>
+        ${lineupHTML(homeLineup, false)}
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px">
+        <div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:8px;text-transform:uppercase;text-align:right">✈️ ${awayName}</div>
+        ${lineupHTML(awayLineup, true)}
+      </div>
+    </div>
+
+    <div style="text-align:center;padding:8px 0 4px">
+      <button class="btn btn-success" style="font-size:16px;padding:14px 32px;margin-top:4px" onclick="window._doKickoff && window._doKickoff()">⚽ Kick Off!</button>
+    </div>
+  `;
+
+  // Store kickoff trigger so button can call it
+  window._doKickoff = () => {
+    window._doKickoff = null;
+    startLiveMatchTick({ homeName, awayName, homeGoals, awayGoals, isPlayerHome, homeScorers, awayScorers, otherResults, onFinish });
+  };
+}
+
+function startLiveMatchTick({ homeName, awayName, homeGoals, awayGoals, isPlayerHome, homeScorers, awayScorers, otherResults, onFinish }) {
+  document.getElementById('liveScoreBox').textContent = '0 – 0';
+  document.getElementById('liveScoreBox').style.color = 'var(--text)';
+  document.getElementById('liveMinuteBox').innerHTML = '<span class="live-pulse"></span>0\'';
+  document.getElementById('liveEvents').innerHTML = '';
+
   const events = generateLiveEvents(homeGoals, awayGoals, homeScorers || [], awayScorers || []);
   let eventIdx = 0;
   let currentMin = 0;
@@ -1487,13 +1648,15 @@ function showLiveMatch({ compType, homeName, homeLogo, awayName, awayLogo, homeG
 
       const otherList = document.getElementById('otherResultsList');
       if (otherResults && otherResults.length) {
-        otherList.innerHTML = otherResults.map(r =>
-          `<div class="other-result-row">
-            <span class="other-result-team">${r.homeLogo} ${r.home}</span>
+        otherList.innerHTML = otherResults.map(r => {
+          const hLogoH = r.homeIsAI ? clubLogoHTML(r.homeLogo, r.homeEmoji, 20, 4) : `<span style="font-size:16px">${r.homeLogo}</span>`;
+          const aLogoH = r.awayIsAI ? clubLogoHTML(r.awayLogo, r.awayEmoji, 20, 4) : `<span style="font-size:16px">${r.awayLogo}</span>`;
+          return `<div class="other-result-row">
+            <span class="other-result-team" style="display:flex;align-items:center;gap:4px">${hLogoH} ${r.home}</span>
             <span class="other-result-score">${r.homeGoals}–${r.awayGoals}</span>
-            <span class="other-result-team" style="text-align:right">${r.away} ${r.awayLogo}</span>
-          </div>`
-        ).join('');
+            <span class="other-result-team" style="text-align:right;display:flex;align-items:center;justify-content:flex-end;gap:4px">${r.away} ${aLogoH}</span>
+          </div>`;
+        }).join('');
       } else {
         otherList.innerHTML = '<div style="font-size:12px;color:var(--text2);text-align:center;padding:8px">No other matches this week</div>';
       }
@@ -1565,6 +1728,7 @@ function generateLiveEvents(homeGoals, awayGoals, homeScorers, awayScorers) {
 
 function closeLiveMatch() {
   if (liveMatchTimer) clearTimeout(liveMatchTimer);
+  window._doKickoff = null;
   document.getElementById('liveMatchOverlay').classList.remove('active');
   if (typeof window._liveMatchFinish === 'function') {
     window._liveMatchFinish();
@@ -1611,21 +1775,21 @@ function startNextSeason() {
   }
 
   G.squad.forEach(p => { p.goals = 0; p.assists = 0; });
+  // FIX #8: 50% chance club makes 1-2 player changes (keep identity)
   G.aiClubs.forEach(club => {
     club.squad.forEach(p => { p.goals = 0; p.assists = 0; });
-
-    // FIX #8: 50% chance club makes 1-2 player changes
     if (Math.random() < 0.5) {
       const numChanges = rand(1, 2);
       for (let i = 0; i < numChanges; i++) {
         if (club.squad.length === 0) break;
-        // Remove the worst player
         club.squad.sort((a, b) => a.rating - b.rating);
         club.squad.shift();
-        // Add a new random player
         club.squad.push(generatePlayer(null));
       }
     }
+    // Restore real club name/logo in case it was migrated from old save
+    const original = AI_CLUBS_DATA.find(d => d.id === club.id);
+    if (original) { club.name = original.name; club.logo = original.logo; club.emoji = original.emoji; }
   });
 
   const allClubs = getAllClubs();
@@ -1643,7 +1807,8 @@ function startNextSeason() {
    ============================================================ */
 function updateDashboard() {
   if (!G) return;
-  document.getElementById('dashLogo').textContent = G.manager.logo;
+  const playerClub = getPlayerClub();
+  document.getElementById('dashLogo').innerHTML = getClubLogoDisplay(playerClub, 56);
   document.getElementById('dashClubName').textContent = G.manager.clubName;
   document.getElementById('dashManagerName').textContent = '👤 ' + G.manager.name;
   document.getElementById('dashWeek').textContent = `Week ${G.currentWeek}`;
@@ -1684,11 +1849,11 @@ function updateDashboard() {
     nm.innerHTML = upcomingPlayerMatches.map(m => {
       const isHome = m.home === 'player';
       const opp = clubs.find(c => c.id === (isHome ? m.away : m.home));
+      const oppLogoH = opp?.isAI ? clubLogoHTML(opp.logo, opp.emoji||'⚽', 20, 4) : `<span>${opp?.logo}</span>`;
       return `<div class="cal-match">
         <span class="cal-week-badge cal-league">W${m.week}</span>
         <div class="cal-match-teams">
-          <div class="cal-home">${isHome ? G.manager.logo + ' ' + G.manager.clubName : opp?.logo + ' ' + opp?.name}</div>
-          <div class="cal-away">vs ${isHome ? opp?.logo + ' ' + opp?.name : G.manager.logo + ' ' + G.manager.clubName}</div>
+          <div class="cal-home" style="display:flex;align-items:center;gap:4px">${isHome ? `<span>${clubLogoHTML(G.manager.logo, '⚽',16,3)}</span> vs <span>${clubLogoHTML(opp.logo, '⚽',16,3)}</span>` : `<span>${clubLogoHTML(opp.logo, '⚽',16,3)}</span> vs <span>${clubLogoHTML(G.manager.logo, '⚽',16,3)}</span>`}</div>
         </div>
         <div class="cal-upcoming">${isHome ? '🏠' : '✈️'}</div>
       </div>`;
@@ -1878,9 +2043,10 @@ function renderLeague() {
     <thead><tr><th>#</th><th>Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody>`;
     table.forEach((r, i) => {
       const isPlayer = r.id === 'player';
+      const logoDisplay = (r.isAI || r.isRealClub) ? clubLogoHTML(r.logo, r.emoji || '⚽', 22, 4) : `<span style="font-size:18px">${r.logo}</span>`;
       html += `<tr class="${isPlayer ? 'player-row' : ''}">
         <td><span class="pos-num">${i + 1}</span></td>
-        <td>${r.logo} ${r.name}</td>
+        <td style="display:flex;align-items:center;gap:6px">${logoDisplay} ${r.name}</td>
         <td>${r.P}</td><td>${r.W}</td><td>${r.D}</td><td>${r.L}</td>
         <td style="color:${r.GD > 0 ? 'var(--green)' : r.GD < 0 ? 'var(--red)' : 'inherit'}">${r.GD > 0 ? '+' : ''}${r.GD}</td>
         <td><strong>${r.Pts}</strong></td>
@@ -1917,8 +2083,7 @@ function renderCalendar(cont) {
       html += `<div class="cal-match">
         <span class="cal-week-badge cal-league">W${m.week}</span>
         <div class="cal-match-teams">
-          <div class="cal-home">${isHome ? '🏠' : '✈️'} ${isHome ? G.manager.logo + ' ' + G.manager.clubName : opp?.logo + ' ' + opp?.name}</div>
-          <div class="cal-away" style="font-size:11px;color:var(--text2)">vs ${isHome ? opp?.logo + ' ' + opp?.name : G.manager.logo + ' ' + G.manager.clubName}</div>
+          <div class="cal-home" style="display:flex;align-items:center;gap:4px">${isHome ? `<span>${clubLogoHTML(G.manager.logo, '⚽',16,3)}</span> vs <span>${clubLogoHTML(opp.logo, '⚽',16,3)}</span>` : `<span>${clubLogoHTML(opp.logo, '⚽',16,3)}</span> vs <span>${clubLogoHTML(G.manager.logo, '⚽',16,3)}</span>`}</div>
         </div>
         ${m.played
           ? `<div class="cal-result ${outcome}">${pGoals}–${oGoals}</div>`
@@ -1932,12 +2097,30 @@ function renderCalendar(cont) {
 function renderScorers(cont) {
   const scorers = Object.values(G.seasonStats.scorers || {}).sort((a, b) => b.goals - a.goals);
   const assists = Object.values(G.seasonStats.assists || {}).sort((a, b) => b.assists - a.assists);
+
+  // Helper: get logo HTML for a club name
+  function clubBadge(clubName) {
+    const playerClub = getPlayerClub();
+    if (clubName === playerClub.name) {
+      return getClubLogoDisplay(playerClub, 22);
+    }
+    const aiClub = G.aiClubs.find(c => c.name === clubName);
+    if (aiClub) return clubLogoHTML(aiClub.logo, aiClub.emoji || '⚽', 22, 4);
+    return `<span style="font-size:16px">⚽</span>`;
+  }
+
   let html = `<div class="section-title">Top Scorers ⚽</div>`;
   if (!scorers.length) html += `<div class="empty-state" style="padding:20px"><div class="empty-text">No goals scored yet</div></div>`;
   scorers.slice(0, 10).forEach((s, i) => {
     html += `<div class="leaderboard-item">
       <div class="leaderboard-rank ${i < 3 ? 'top' : ''}">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</div>
-      <div style="flex:1"><div style="font-size:13px;font-weight:600">${s.name}</div><div style="font-size:11px;color:var(--text2)">${s.club}</div></div>
+      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+        ${clubBadge(s.club)}
+        <div style="min-width:0">
+          <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.name}</div>
+          <div style="font-size:11px;color:var(--text2)">${s.club}</div>
+        </div>
+      </div>
       <div style="font-size:16px;font-weight:900;color:var(--green)">${s.goals}⚽</div>
     </div>`;
   });
@@ -1946,7 +2129,13 @@ function renderScorers(cont) {
   assists.slice(0, 10).forEach((a, i) => {
     html += `<div class="leaderboard-item">
       <div class="leaderboard-rank ${i < 3 ? 'top' : ''}">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</div>
-      <div style="flex:1"><div style="font-size:13px;font-weight:600">${a.name}</div><div style="font-size:11px;color:var(--text2)">${a.club}</div></div>
+      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+        ${clubBadge(a.club)}
+        <div style="min-width:0">
+          <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.name}</div>
+          <div style="font-size:11px;color:var(--text2)">${a.club}</div>
+        </div>
+      </div>
       <div style="font-size:16px;font-weight:900;color:var(--purple)">${a.assists}🅰️</div>
     </div>`;
   });
@@ -2054,10 +2243,11 @@ function renderMore() {
     clubs.forEach(c => {
       const row = table.find(r => r.id === c.id);
       const isPlayer = c.id === 'player';
+      const logoDisplay = (c.isAI || c.isRealClub) ? clubLogoHTML(c.logo, c.emoji || '⚽', 36, 6) : `<span style="font-size:28px">${c.logo}</span>`;
       html += `<div class="card" onclick="viewClub('${c.id}')" style="cursor:pointer${isPlayer ? ';border-color:var(--accent)' : ''}">
         <div class="flex-between">
           <div style="display:flex;align-items:center;gap:10px">
-            <div style="font-size:28px">${c.logo}</div>
+            ${logoDisplay}
             <div>
               <div style="font-weight:700;font-size:14px">${c.name}${isPlayer ? ' ⭐' : ''}</div>
               <div style="font-size:12px;color:var(--text2)">${c.squad.length} players · Avg ${avgRating(c)}★</div>
@@ -2098,13 +2288,14 @@ function viewClub(clubId) {
   const clubs = getAllClubs();
   const club = clubs.find(c => c.id === clubId);
   if (!club) return;
-  document.getElementById('clubViewTitle').textContent = club.logo + ' ' + club.name;
+  document.getElementById('clubViewTitle').textContent = club.name;
   const cont = document.getElementById('clubViewContent');
   const table = getTableStats();
   const row = table.find(r => r.id === clubId);
+  const bigLogoHTML = (club.isAI || club.isRealClub) ? clubLogoHTML(club.logo, club.emoji || '⚽', 72, 12) : `<span style="font-size:56px">${club.logo}</span>`;
   let html = `<div style="text-align:center;padding:20px 0 12px">
-    <div style="font-size:48px">${club.logo}</div>
-    <div style="font-size:20px;font-weight:900;margin-top:4px">${club.name}</div>
+    ${bigLogoHTML}
+    <div style="font-size:20px;font-weight:900;margin-top:8px">${club.name}</div>
     <div style="font-size:12px;color:var(--text2)">${club.isAI ? 'AI Club' : 'Your Club'}</div>
   </div>
   <div class="stat-grid">
