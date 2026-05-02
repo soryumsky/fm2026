@@ -838,6 +838,7 @@ body {
     <div class="tabs">
       <div class="tab active" onclick="moreTab('clubs')" id="mtab-clubs">Clubs</div>
       <div class="tab" onclick="moreTab('history')" id="mtab-history">History</div>
+      <div class="tab" onclick="moreTab('eurohist')" id="mtab-eurohist">🌟 Euro</div>
     </div>
     <div class="scroll-area" id="moreContent"></div>
     <div class="bottom-nav">
@@ -856,6 +857,11 @@ body {
       <h1 id="clubViewTitle">Club</h1>
     </div>
     <div class="scroll-area" id="clubViewContent"></div>
+  </div>
+
+  <!-- BALLON D'OR OVERLAY -->
+  <div class="overlay" id="ballonDorOverlay" style="z-index:250">
+    <div class="gacha-result" id="ballonDorContent" style="max-width:340px"></div>
   </div>
 
 </div>
@@ -1061,7 +1067,7 @@ function simulatePenalties() {
   return hPens > aPens ? 'home' : 'away';
 }
 
-/* Goals assignment — only for league (UCL/UEL don't track top scorers) */
+/* Goals assignment — for all competitions (trackStats=true by default) */
 function assignGoals(club, goals, trackStats = true) {
   let lineup;
   if (club.isAI) {
@@ -1191,29 +1197,26 @@ function avgRating(club) {
 
 function generateEuropeanCompetition(qualifiedIds, compType) {
   // compType: 'ucl' or 'uel'
-  // Each tie: { id, round, legNum (1 or 2), home, away, played, homeGoals, awayGoals, compType, tieId }
-  // Rounds: 'R16' for 8 teams (skip R16, go straight QF->SF->F for 8 teams)
-  // With 8 clubs: QF (4 ties), SF (2 ties), Final (1 tie)
-  const ids = shuffle([...qualifiedIds]);
+  // Format: Start from Semi Final (SF) with 4 teams
+  // SF: 2-leg Home & Away. Final: 1 leg (neutral venue)
+  // Rounds: SF (2 ties, 2 legs each) → Final (1 tie, 1 leg)
+  const ids = shuffle([...qualifiedIds.slice(0, 4)]); // take top 4 only
   const matches = [];
-  const rounds = ['QF', 'SF', 'F'];
-  // Week offset — euro matches weave between league weeks
-  // We'll use 'euroWeek' property to sequence them
-  // Initial pairings for QF
-  let qfTies = [];
+  // SF pairings
+  let sfTies = [];
   for (let i = 0; i < ids.length; i += 2) {
     if (i + 1 < ids.length) {
       const tieId = uid();
-      qfTies.push({ tieId, home1: ids[i], away1: ids[i+1], round: 'QF', compType });
+      sfTies.push({ tieId, home1: ids[i], away1: ids[i+1], round: 'SF', compType });
     }
   }
-  // We don't pre-generate SF/F here — they're generated after QF resolves
-  // Store just QF matches
-  qfTies.forEach(tie => {
-    matches.push({ id: uid(), tieId: tie.tieId, round: 'QF', leg: 1, home: tie.home1, away: tie.away1, played: false, homeGoals: 0, awayGoals: 0, compType });
-    matches.push({ id: uid(), tieId: tie.tieId, round: 'QF', leg: 2, home: tie.away1, away: tie.home1, played: false, homeGoals: 0, awayGoals: 0, compType });
+  // Generate SF legs
+  sfTies.forEach(tie => {
+    matches.push({ id: uid(), tieId: tie.tieId, round: 'SF', leg: 1, home: tie.home1, away: tie.away1, played: false, homeGoals: 0, awayGoals: 0, compType });
+    matches.push({ id: uid(), tieId: tie.tieId, round: 'SF', leg: 2, home: tie.away1, away: tie.home1, played: false, homeGoals: 0, awayGoals: 0, compType });
   });
-  return { matches, currentRound: 'QF', compType, ties: qfTies, finished: false, winner: null };
+  // Final & SF winners generated after SF resolves
+  return { matches, currentRound: 'SF', compType, ties: sfTies, finished: false, winner: null };
 }
 
 function generateSuperCup(uclWinnerId, uelWinnerId) {
@@ -1249,7 +1252,7 @@ function getNextEuroMatch(comp) {
 
 // After a round finishes, generate next round matches and return updated comp
 function advanceEuropeanRound(comp) {
-  const rounds = ['QF', 'SF', 'F'];
+  const rounds = ['SF', 'F'];
   const roundIdx = rounds.indexOf(comp.currentRound);
   if (roundIdx < 0 || comp.currentRound === 'F') return comp;
 
@@ -1272,10 +1275,9 @@ function advanceEuropeanRound(comp) {
   const newMatches = [];
 
   if (nextRound === 'F') {
-    // Final: 2 legs
+    // Final: 1 leg only (neutral venue, no home/away advantage)
     const tieId = uid();
-    newMatches.push({ id: uid(), tieId, round: 'F', leg: 1, home: shuffledWinners[0], away: shuffledWinners[1], played: false, homeGoals: 0, awayGoals: 0, compType: comp.compType });
-    newMatches.push({ id: uid(), tieId, round: 'F', leg: 2, home: shuffledWinners[1], away: shuffledWinners[0], played: false, homeGoals: 0, awayGoals: 0, compType: comp.compType });
+    newMatches.push({ id: uid(), tieId, round: 'F', leg: 1, home: shuffledWinners[0], away: shuffledWinners[1], played: false, homeGoals: 0, awayGoals: 0, compType: comp.compType, isFinal: true });
   } else {
     for (let i = 0; i < shuffledWinners.length; i += 2) {
       const tieId = uid();
@@ -1297,10 +1299,9 @@ function checkAndAdvanceComp(comp) {
   if (!allPlayed) return comp;
 
   if (comp.currentRound === 'F') {
-    // Determine winner of Final
-    const tieId = current[0].tieId;
-    const legs = current.filter(m => m.tieId === tieId).sort((a, b) => a.leg - b.leg);
-    comp.winner = getTieWinner(legs[0], legs[1]);
+    // Final is 1 leg — single match winner
+    const finalMatch = current[0];
+    comp.winner = getSuperCupWinner(finalMatch);
     comp.finished = true;
     return comp;
   }
@@ -1523,7 +1524,6 @@ function playWeek() {
     return;
   }
 
-  // Priority: Super Cup first (start of season), then alternate league/euro
   // Super Cup is played before any league matches of a new season
   if (G.superCup && !G.superCup.finished) {
     const scMatch = G.superCup.matches.find(m => !m.played);
@@ -1533,24 +1533,39 @@ function playWeek() {
     }
   }
 
-  // Check if there are euro matches pending before next league week
+  // Interleave euro matches with league:
+  // Every 3 league weeks, insert 1 euro match (UCL or UEL alternating)
+  // This way euro runs in parallel with the league season
   const unplayedLeague = G.leagueMatches.filter(m => !m.played);
   const nextLeagueWeek = unplayedLeague.length ? Math.min(...unplayedLeague.map(m => m.week)) : Infinity;
 
-  // Play next pending euro match (UCL or UEL)
   const nextUcl = G.ucl && !G.ucl.finished ? G.ucl.matches.find(m => !m.played) : null;
   const nextUel = G.uel && !G.uel.finished ? G.uel.matches.find(m => !m.played) : null;
 
-  // Interleave: play one euro match per "week" cycle, alternating with league
-  // Simple rule: if there are pending euro matches, play one euro match
-  // then play a league week, so euro doesn't block league
-  // Let's play league first, then euro
+  // Count played league weeks so far
+  const playedLeagueWeeks = G.leagueMatches.filter(m => m.played).length > 0
+    ? Math.max(...G.leagueMatches.filter(m => m.played).map(m => m.week), 0)
+    : 0;
+
+  // Insert euro match every 3 league weeks if any pending
+  // UCL: after weeks 3, 9 (SF leg1, SF leg2), after week 15 (Final)
+  // UEL: after weeks 6, 12 (SF leg1, SF leg2), after week 18 (Final)
+  // Simplified: alternate UCL/UEL every 3 weeks when available
+  const euroSlot = (nextUcl || nextUel) && (playedLeagueWeeks % 3 === 0) && playedLeagueWeeks > 0;
+  
+  if (euroSlot && !G.leagueFinished) {
+    // Alternate: prefer UCL first, then UEL
+    if (nextUcl) { playEuroMatch(G.ucl, nextUcl); return; }
+    if (nextUel) { playEuroMatch(G.uel, nextUel); return; }
+  }
+
+  // Play league week
   if (!G.leagueFinished && unplayedLeague.length > 0) {
     playLeagueWeek();
     return;
   }
 
-  // League done, play remaining euro
+  // League done, finish any remaining euro
   if (nextUcl) { playEuroMatch(G.ucl, nextUcl); return; }
   if (nextUel) { playEuroMatch(G.uel, nextUel); return; }
 }
@@ -1618,9 +1633,9 @@ function playLeagueWeek() {
       onFinish: () => {
         const pGoals = isHome ? homeGoals : awayGoals;
         const oGoals = isHome ? awayGoals : homeGoals;
-        let reward = 80;
+        let reward = 0;
         if (pGoals > oGoals) reward = 300;
-        else if (pGoals === oGoals) reward = 100;
+        else if (pGoals === oGoals) reward = 150;
         G.gold += reward;
         const outcome = pGoals > oGoals ? 'win' : pGoals < oGoals ? 'loss' : 'draw';
         G.recentResults.unshift({ home: isHome ? G.manager.clubName : oppClub.name, away: isHome ? oppClub.name : G.manager.clubName, homeGoals, awayGoals, week: nextWeek, outcome, comp: 'Liga' });
@@ -1642,8 +1657,8 @@ function playEuroMatch(comp, match) {
   const clubs = getAllClubs();
   const isPlayerInvolved = match.home === 'player' || match.away === 'player';
   const compLabel = comp.compType === 'ucl' ? '🌟 Champions League' : '🟠 Europa League';
-  const roundLabel = { QF: 'Perempat Final', SF: 'Semi Final', F: 'Final' }[match.round] || match.round;
-  const legLabel = `Leg ${match.leg}`;
+  const roundLabel = { SF: 'Semi Final', F: 'Final' }[match.round] || match.round;
+  const legLabel = match.round === 'F' ? '' : `Leg ${match.leg}`;
 
   if (!isPlayerInvolved) {
     // Simulate AI match
@@ -1652,8 +1667,8 @@ function playEuroMatch(comp, match) {
     if (hClub && aClub) {
       const { homeGoals, awayGoals } = simulateMatchResult(hClub, aClub);
       match.homeGoals = homeGoals; match.awayGoals = awayGoals; match.played = true;
-      assignGoals(hClub, homeGoals, false);
-      assignGoals(aClub, awayGoals, false);
+      assignGoals(hClub, homeGoals, true);
+      assignGoals(aClub, awayGoals, true);
     }
     // Check if round is done, advance
     checkAndAdvanceComp(comp);
@@ -1673,12 +1688,12 @@ function playEuroMatch(comp, match) {
 
   const homeClub2 = isHome ? playerClub : oppClub;
   const awayClub2 = isHome ? oppClub : playerClub;
-  const homeScorerNames = assignGoals(homeClub2, homeGoals, false);
-  const awayScorerNames = assignGoals(awayClub2, awayGoals, false);
+  const homeScorerNames = assignGoals(homeClub2, homeGoals, true);
+  const awayScorerNames = assignGoals(awayClub2, awayGoals, true);
 
-  // Aggregate info for 2-legged ties
+  // Aggregate info for 2-legged ties (SF only, not Final)
   let aggInfo = '';
-  if (match.leg === 2) {
+  if (match.leg === 2 && match.round !== 'F') {
     const leg1 = comp.matches.find(m => m.tieId === match.tieId && m.leg === 1);
     if (leg1) {
       const agg1 = leg1.homeGoals + homeGoals; // original home team across both legs
@@ -1688,7 +1703,7 @@ function playEuroMatch(comp, match) {
   }
 
   showLiveMatch({
-    compType: `${compLabel} · ${roundLabel} ${legLabel}${aggInfo ? ' | ' + aggInfo : ''}`,
+    compType: `${compLabel} · ${roundLabel}${legLabel ? ' ' + legLabel : ''}${aggInfo ? ' | ' + aggInfo : ''}`,
     compBadge: comp.compType === 'ucl' ? 'ucl' : 'uel',
     homeName: isHome ? G.manager.clubName : oppClub.name,
     homeLogo: isHome ? G.manager.logo : oppClub.logo,
@@ -1706,9 +1721,10 @@ function playEuroMatch(comp, match) {
     onFinish: () => {
       const pGoals = isHome ? homeGoals : awayGoals;
       const oGoals = isHome ? awayGoals : homeGoals;
-      let reward = 80;
-      if (pGoals > oGoals) reward = 200;
-      else if (pGoals === oGoals) reward = 80;
+      const isUcl = comp.compType === 'ucl';
+      let reward = 0;
+      if (pGoals > oGoals) reward = isUcl ? 100 : 50;
+      else if (pGoals === oGoals) reward = isUcl ? 50 : 25;
       G.gold += reward;
       const outcome = pGoals > oGoals ? 'win' : pGoals < oGoals ? 'loss' : 'draw';
       G.recentResults.unshift({ home: isHome ? G.manager.clubName : oppClub.name, away: isHome ? oppClub.name : G.manager.clubName, homeGoals, awayGoals, comp: comp.compType === 'ucl' ? 'UCL' : 'UEL', outcome });
@@ -1721,7 +1737,9 @@ function playEuroMatch(comp, match) {
       if (comp.finished && comp.winner) {
         const winnerName = getClubName(comp.winner);
         const trophy = comp.compType === 'ucl' ? '🏆 UCL' : '🟠 UEL';
-        notify(`${trophy} Champion: ${winnerName}!`, 'gold', 5000);
+        const champBonus = isUcl ? 1000 : 500;
+        if (comp.winner === 'player') G.gold += champBonus;
+        notify(`${trophy} Champion: ${winnerName}!${comp.winner === 'player' ? ` +${champBonus}🪙` : ''}`, 'gold', 5000);
         // AI reward
         if (comp.winner !== 'player') {
           giveAIChampionReward(comp.winner);
@@ -1765,8 +1783,8 @@ function playSuperCupMatch(match) {
 
   const homeClub2 = isHome ? playerClub : oppClub;
   const awayClub2 = isHome ? oppClub : playerClub;
-  const homeScorerNames = assignGoals(homeClub2, homeGoals, false);
-  const awayScorerNames = assignGoals(awayClub2, awayGoals, false);
+  const homeScorerNames = assignGoals(homeClub2, homeGoals, true);
+  const awayScorerNames = assignGoals(awayClub2, awayGoals, true);
 
   showLiveMatch({
     compType: '⭐ Super Cup · Final',
@@ -1787,14 +1805,14 @@ function playSuperCupMatch(match) {
     onFinish: () => {
       const pGoals = isHome ? homeGoals : awayGoals;
       const oGoals = isHome ? awayGoals : homeGoals;
-      G.gold += (pGoals > oGoals ? 500 : pGoals === oGoals ? 150 : 100);
       const winner = getSuperCupWinner(match);
       G.superCup.winner = winner; G.superCup.finished = true;
+      if (winner === 'player') G.gold += 250;
       const outcome = pGoals > oGoals ? 'win' : pGoals < oGoals ? 'loss' : 'draw';
       G.recentResults.unshift({ home: isHome ? G.manager.clubName : oppClub.name, away: isHome ? oppClub.name : G.manager.clubName, homeGoals, awayGoals, comp: 'Super Cup', outcome });
       if (G.recentResults.length > 15) G.recentResults.pop();
       if (winner !== 'player') giveAIChampionReward(winner);
-      notify(`⭐ Super Cup Winner: ${getClubName(winner)}!`, 'gold', 5000);
+      notify(`⭐ Super Cup Winner: ${getClubName(winner)}!${winner === 'player' ? ' +250🪙' : ''}`, 'gold', 5000);
       saveGame(); updateDashboard();
     }
   });
@@ -1976,27 +1994,104 @@ function closeLiveMatch() {
 }
 
 /* ============================================================
+   BALLON D'OR — Best player of the season
+   ============================================================ */
+function computeBallonDor() {
+  // Score each player based on: goals*3 + assists*2 + rating bonus
+  // Covers stats from Liga, UCL, UEL, Super Cup (all now tracked)
+  const scores = {};
+  const allStats = G.seasonStats.scorers || {};
+  const allAssists = G.seasonStats.assists || {};
+
+  // Merge goals and assists into a single score per player id
+  Object.entries(allStats).forEach(([id, s]) => {
+    if (!scores[id]) scores[id] = { name: s.name, club: s.club, goals: 0, assists: 0, rating: 0 };
+    scores[id].goals += s.goals;
+  });
+  Object.entries(allAssists).forEach(([id, s]) => {
+    if (!scores[id]) scores[id] = { name: s.name, club: s.club, goals: 0, assists: 0, rating: 0 };
+    scores[id].assists += s.assists;
+  });
+
+  // Add rating info from player squads
+  const allClubs = getAllClubs();
+  allClubs.forEach(club => {
+    club.squad.forEach(p => {
+      if (scores[p.id]) scores[p.id].rating = p.rating;
+      else scores[p.id] = { name: p.name, club: club.name, goals: 0, assists: 0, rating: p.rating };
+    });
+  });
+
+  // Calculate final score
+  const ranked = Object.entries(scores).map(([id, s]) => ({
+    id, ...s,
+    score: s.goals * 3 + s.assists * 2 + Math.round(s.rating / 10)
+  })).sort((a, b) => b.score - a.score || b.goals - a.goals || b.rating - a.rating);
+
+  return ranked[0] || null;
+}
+
+function showBallonDor(winner, season, onClose) {
+  if (!winner) { onClose && onClose(); return; }
+  const isPlayerClub = winner.club === G.manager.clubName;
+  const tierColor = winner.rating >= 86 ? 'var(--tier-s)' : winner.rating >= 76 ? 'var(--tier-a)' : winner.rating >= 66 ? 'var(--tier-b)' : 'var(--tier-c)';
+  document.getElementById('ballonDorContent').innerHTML = `
+    <div style="text-align:center">
+      <div style="font-size:40px;margin-bottom:4px">🏅</div>
+      <div style="font-size:18px;font-weight:900;color:var(--gold2);margin-bottom:2px">Ballon d'Or</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:20px">Pemain Terbaik Musim ${season}</div>
+      <div style="background:linear-gradient(135deg,rgba(245,158,11,0.15),rgba(251,191,36,0.05));border:2px solid var(--gold);border-radius:16px;padding:20px;margin-bottom:16px">
+        <div style="font-size:28px;font-weight:900;color:${tierColor}">${winner.rating}★</div>
+        <div style="font-size:18px;font-weight:800;margin:6px 0 4px">${winner.name}</div>
+        <div style="font-size:12px;color:var(--text2)">${winner.club}${isPlayerClub ? ' ⭐' : ''}</div>
+        <div style="display:flex;justify-content:center;gap:20px;margin-top:14px">
+          <div style="text-align:center"><div style="font-size:22px;font-weight:900;color:var(--green)">${winner.goals}</div><div style="font-size:10px;color:var(--text2)">Gol</div></div>
+          <div style="text-align:center"><div style="font-size:22px;font-weight:900;color:var(--accent2)">${winner.assists}</div><div style="font-size:10px;color:var(--text2)">Assist</div></div>
+          <div style="text-align:center"><div style="font-size:22px;font-weight:900;color:var(--gold2)">${winner.score}</div><div style="font-size:10px;color:var(--text2)">Score</div></div>
+        </div>
+      </div>
+      ${isPlayerClub ? '<div style="font-size:13px;color:var(--gold2);margin-bottom:12px">🎉 Pemain dari timmu menang Ballon d\'Or!</div>' : ''}
+      <button class="btn btn-primary" onclick="document.getElementById(\'ballonDorOverlay\').classList.remove(\'active\');${onClose ? 'window._bdClose&&window._bdClose()' : ''}">✅ Lanjutkan</button>
+    </div>`;
+  document.getElementById('ballonDorOverlay').classList.add('active');
+  if (onClose) window._bdClose = onClose;
+}
+
+/* ============================================================
    SEASON END
    ============================================================ */
 function endLeagueSeason() {
   const table = getTableStats();
   const champion = table[0];
   const pos = getPlayerPosition();
-  const bonus = Math.max(0, (10 - pos)) * 150 + 500;
+
+  // Tiered league position gold reward
+  let bonus = 0;
+  if (pos === 1) bonus = 2000;
+  else if (pos <= 4) bonus = 1000;
+  else if (pos <= 8) bonus = 500;
+  else bonus = 250;
   G.gold += bonus;
   G.leagueFinished = true;
 
+  // Ballon d'Or — compute best player of season
+  const ballonWinner = computeBallonDor();
+  const ballonName = ballonWinner ? ballonWinner.name : null;
+
   G.seasonHistory.push({
-    season: G.season, playerPosition: pos, leagueWinner: champion.name
+    season: G.season, playerPosition: pos, leagueWinner: champion.name,
+    uclWinner: (G.ucl && G.ucl.finished && G.ucl.winner) ? getClubName(G.ucl.winner) : null,
+    uelWinner: (G.uel && G.uel.finished && G.uel.winner) ? getClubName(G.uel.winner) : null,
+    superCupWinner: (G.superCup && G.superCup.finished && G.superCup.winner) ? getClubName(G.superCup.winner) : null,
+    ballonDor: ballonName
   });
 
   // Reward AI league champion
   if (champion.id !== 'player') giveAIChampionReward(champion.id);
 
-  // Generate UCL/UEL for season 1+ (active from season 2 onwards, but we generate at end of season 1 for use in season 2)
-  // Actually: UCL/UEL run parallel to the current season starting from season 2
-  // So at end of season N, generate UCL/UEL based on that season's table, to be played in season N+1
-  // Store as pendingEuro
+  // Generate UCL/UEL for next season based on current table
+  // UCL: top 4 clubs, UEL: 5th-8th clubs
+  // Both comps start from Semi Final (4 teams each)
   const topPositions = table.map((r, i) => ({ ...r, pos: i + 1 }));
   const uclTeams = topPositions.slice(0, 4).map(r => r.id);
   const uelTeams = topPositions.slice(4, 8).map(r => r.id);
@@ -2009,9 +2104,13 @@ function endLeagueSeason() {
     G.pendingSuperCup = { uclWinner: G.ucl.winner, uelWinner: G.uel.winner };
   }
 
-  notify(`🏆 Season ${G.season} Complete! Champion: ${champion.name} | You: #${pos} | +${bonus}🪙`, 'gold', 5000);
+  const posLabel = pos === 1 ? 'Juara! 🏆' : `#${pos}`;
+  notify(`🏆 Musim ${G.season} Selesai! Champion: ${champion.name} | Kamu: ${posLabel} | +${bonus}🪙`, 'gold', 5000);
   updatePlayWeekBtn();
   saveGame();
+
+  // Show Ballon d'Or award after a short delay
+  setTimeout(() => showBallonDor(ballonWinner, G.season, null), 1500);
 }
 
 function updatePlayWeekBtn() {
@@ -2143,8 +2242,9 @@ function updateDashboard() {
     uclMatches.slice(0, 2).forEach(m => {
       const isHome = m.home === 'player';
       const oppId = isHome ? m.away : m.home;
-      const roundLabel = { QF: 'QF', SF: 'SF', F: 'Final' }[m.round] || m.round;
-      upcomingFixtures.push({ label: `🌟 UCL ${roundLabel} Leg${m.leg}`, comp: 'ucl', isHome, oppId, week: 999 + m.leg });
+      const roundLabel = { SF: 'SF', F: 'Final' }[m.round] || m.round;
+      const legStr = m.round === 'F' ? '' : ` Leg${m.leg}`;
+      upcomingFixtures.push({ label: `🌟 UCL ${roundLabel}${legStr}`, comp: 'ucl', isHome, oppId, week: 999 + m.leg });
     });
   }
 
@@ -2154,8 +2254,9 @@ function updateDashboard() {
     uelMatches.slice(0, 2).forEach(m => {
       const isHome = m.home === 'player';
       const oppId = isHome ? m.away : m.home;
-      const roundLabel = { QF: 'QF', SF: 'SF', F: 'Final' }[m.round] || m.round;
-      upcomingFixtures.push({ label: `🟠 UEL ${roundLabel} Leg${m.leg}`, comp: 'uel', isHome, oppId, week: 998 + m.leg });
+      const roundLabel = { SF: 'SF', F: 'Final' }[m.round] || m.round;
+      const legStr = m.round === 'F' ? '' : ` Leg${m.leg}`;
+      upcomingFixtures.push({ label: `🟠 UEL ${roundLabel}${legStr}`, comp: 'uel', isHome, oppId, week: 998 + m.leg });
     });
   }
 
@@ -2396,11 +2497,12 @@ function renderCalendar(cont) {
     comp.matches.filter(m => m.home === 'player' || m.away === 'player').forEach(m => {
       const isHome = m.home === 'player';
       const oppId = isHome ? m.away : m.home;
-      const roundLabel = { QF: 'QF', SF: 'SF', F: 'Final', SC: 'Super Cup' }[m.round] || m.round;
+      const roundLabel = { SF: 'SF', F: 'Final', SC: 'Super Cup' }[m.round] || m.round;
       const pGoals = isHome ? m.homeGoals : m.awayGoals;
       const oGoals = isHome ? m.awayGoals : m.homeGoals;
       const outcome = m.played ? (pGoals > oGoals ? 'win' : pGoals < oGoals ? 'loss' : 'draw') : '';
-      euroPlayerMatches.push({ oppId, isHome, played: m.played, pGoals, oGoals, outcome, compType, compLabel: compType === 'ucl' ? '🌟UCL' : compType === 'uel' ? '🟠UEL' : '⭐SC', roundLabel, leg: m.leg, sortKey: compType === 'supercup' ? -1 : 9000 });
+      const legStr = m.round !== 'F' && m.round !== 'SC' ? ` L${m.leg}` : '';
+      euroPlayerMatches.push({ oppId, isHome, played: m.played, pGoals, oGoals, outcome, compType, compLabel: compType === 'ucl' ? '🌟UCL' : compType === 'uel' ? '🟠UEL' : '⭐SC', roundLabel, leg: m.leg, legStr, sortKey: compType === 'supercup' ? -1 : 9000 });
     });
   });
 
@@ -2435,7 +2537,7 @@ function renderCalendar(cont) {
     const pLogo = clubLogoHTML(G.manager.logo, '⚽', 16, 3);
     const oppLogo = opp?.isAI ? clubLogoHTML(opp.logo, opp.emoji||'⚽', 16, 3) : `<span style="font-size:12px">${opp?.logo||'?'}</span>`;
     const cc = compColors4[fx.compType] || '#3b82f6';
-    const legStr = fx.leg ? ` L${fx.leg}` : '';
+    const legStr = fx.legStr !== undefined ? fx.legStr : (fx.leg ? ` L${fx.leg}` : '');
     html += `<div class="cal-match">
       <span style="font-size:9px;background:${cc}22;color:${cc};border:1px solid ${cc}44;padding:2px 5px;border-radius:3px;font-weight:700;white-space:nowrap">${fx.compLabel} ${fx.roundLabel}${legStr}</span>
       <div class="cal-match-teams">
@@ -2490,8 +2592,8 @@ function renderCompBracket(comp, title, color) {
     </div>`;
   }
 
-  const rounds = ['SC','QF','SF','F'];
-  const roundLabels = { SC: 'Final', QF: 'Perempat Final', SF: 'Semi Final', F: 'Final' };
+  const rounds = ['SC','SF','F'];
+  const roundLabels = { SC: 'Super Cup Final', SF: 'Semi Final', F: 'Final' };
   const matchesByRound = {};
   comp.matches.forEach(m => {
     if (!matchesByRound[m.round]) matchesByRound[m.round] = [];
@@ -2639,12 +2741,16 @@ function renderShop() {
   <div class="section-title">Earn Gold</div>
   <div class="card">
     <div style="font-size:12px;color:var(--text2);line-height:1.8">
-      🏆 Win Liga: <strong style="color:var(--green)">+300🪙</strong><br>
-      🤝 Draw Liga: <strong style="color:var(--gold2)">+100🪙</strong><br>
-      💔 Loss Liga: <strong style="color:var(--red)">+80🪙</strong><br>
-      🌟 Win UCL/UEL: <strong style="color:var(--green)">+200🪙</strong><br>
-      ⭐ Win Super Cup: <strong style="color:var(--gold2)">+500🪙</strong><br>
-      🥇 End of Season: <strong style="color:var(--accent2)">+500–2000🪙</strong>
+      🏆 <strong style="color:var(--text)">Liga</strong><br>
+      &nbsp;&nbsp;Menang: <strong style="color:var(--green)">+300🪙</strong> · Seri: <strong style="color:var(--gold2)">+150🪙</strong> · Kalah: <strong style="color:var(--red)">0🪙</strong><br>
+      &nbsp;&nbsp;Juara 1: <strong style="color:var(--green)">+2000🪙</strong> · Top 4: <strong style="color:var(--gold2)">+1000🪙</strong><br>
+      &nbsp;&nbsp;Top 8: <strong style="color:var(--accent2)">+500🪙</strong> · Sisa: <strong style="color:var(--text2)">+250🪙</strong><br>
+      🌟 <strong style="color:var(--text)">UCL</strong><br>
+      &nbsp;&nbsp;Menang: <strong style="color:var(--green)">+100🪙</strong> · Seri: <strong style="color:var(--gold2)">+50🪙</strong> · Kalah: 0🪙 · Juara: <strong style="color:var(--gold2)">+1000🪙</strong><br>
+      🟠 <strong style="color:var(--text)">UEL</strong><br>
+      &nbsp;&nbsp;Menang: <strong style="color:var(--green)">+50🪙</strong> · Seri: <strong style="color:var(--gold2)">+25🪙</strong> · Kalah: 0🪙 · Juara: <strong style="color:var(--gold2)">+500🪙</strong><br>
+      ⭐ <strong style="color:var(--text)">Super Cup</strong><br>
+      &nbsp;&nbsp;Juara: <strong style="color:var(--purple)">+250🪙</strong>
     </div>
   </div>`;
   cont.innerHTML = html;
@@ -2688,6 +2794,7 @@ function moreTab(tab) {
   currentMoreTab = tab;
   document.getElementById('mtab-clubs').classList.toggle('active', tab === 'clubs');
   document.getElementById('mtab-history').classList.toggle('active', tab === 'history');
+  document.getElementById('mtab-eurohist').classList.toggle('active', tab === 'eurohist');
   renderMore();
 }
 
@@ -2718,7 +2825,7 @@ function renderMore() {
       </div>`;
     });
     cont.innerHTML = html;
-  } else {
+  } else if (currentMoreTab === 'history') {
     let html = `<div class="section-title">Season History (${G.seasonHistory.length} seasons)</div>`;
     if (!G.seasonHistory.length) {
       html += `<div class="empty-state"><div class="empty-icon">📚</div><div class="empty-text">No completed seasons yet</div></div>`;
@@ -2732,9 +2839,85 @@ function renderMore() {
           ${h.uclWinner ? `<div class="history-stat">🌟 UCL: <span>${h.uclWinner}</span></div>` : ''}
           ${h.uelWinner ? `<div class="history-stat">🟠 UEL: <span>${h.uelWinner}</span></div>` : ''}
           ${h.superCupWinner ? `<div class="history-stat">⭐ Super Cup: <span>${h.superCupWinner}</span></div>` : ''}
+          ${h.ballonDor ? `<div class="history-stat">🏅 Ballon d'Or: <span>${h.ballonDor}</span></div>` : ''}
         </div>
       </div>`;
     });
+    cont.innerHTML = html;
+  } else {
+    // European Winners History
+    let html = `<div class="section-title">🌟 European Honours Board</div>`;
+    const seasons = G.seasonHistory.filter(h => h.uclWinner || h.uelWinner || h.superCupWinner);
+    if (!seasons.length) {
+      html += `<div class="empty-state"><div class="empty-icon">🏆</div><div class="empty-text">No European history yet.<br>Complete Season 2+ to see results.</div></div>`;
+    } else {
+      // UCL winners
+      const uclWins = seasons.filter(h => h.uclWinner);
+      if (uclWins.length) {
+        html += `<div class="section-title" style="color:var(--gold2)">🌟 Champions League Winners</div>`;
+        // Count wins per club
+        const uclCount = {};
+        uclWins.forEach(h => { uclCount[h.uclWinner] = (uclCount[h.uclWinner] || 0) + 1; });
+        const uclSorted = Object.entries(uclCount).sort((a,b) => b[1]-a[1]);
+        html += `<div class="card" style="border-color:#f59e0b44;margin-bottom:12px">`;
+        uclSorted.forEach(([name, count], i) => {
+          html += `<div class="leaderboard-item">
+            <div class="leaderboard-rank ${i < 3 ? 'top' : ''}">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i+1}</div>
+            <div style="flex:1;font-size:13px;font-weight:600">${name}</div>
+            <div style="font-size:14px;font-weight:900;color:var(--gold2)">${count}x 🏆</div>
+          </div>`;
+        });
+        html += `</div>`;
+        // Season by season
+        html += `<div class="section-title" style="font-size:11px;color:var(--text3)">Season Results</div>`;
+        uclWins.slice().reverse().forEach(h => {
+          html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(42,58,92,0.3);font-size:12px">
+            <span style="color:var(--text2);min-width:64px">Season ${h.season}</span>
+            <span style="font-weight:700;color:var(--gold2)">🌟 ${h.uclWinner}</span>
+          </div>`;
+        });
+      }
+      // UEL winners
+      const uelWins = seasons.filter(h => h.uelWinner);
+      if (uelWins.length) {
+        html += `<div class="divider"></div><div class="section-title" style="color:#f97316">🟠 Europa League Winners</div>`;
+        const uelCount = {};
+        uelWins.forEach(h => { uelCount[h.uelWinner] = (uelCount[h.uelWinner] || 0) + 1; });
+        const uelSorted = Object.entries(uelCount).sort((a,b) => b[1]-a[1]);
+        html += `<div class="card" style="border-color:#f9731644;margin-bottom:12px">`;
+        uelSorted.forEach(([name, count], i) => {
+          html += `<div class="leaderboard-item">
+            <div class="leaderboard-rank ${i < 3 ? 'top' : ''}">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i+1}</div>
+            <div style="flex:1;font-size:13px;font-weight:600">${name}</div>
+            <div style="font-size:14px;font-weight:900;color:#f97316">${count}x 🏆</div>
+          </div>`;
+        });
+        html += `</div>`;
+        uelWins.slice().reverse().forEach(h => {
+          html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(42,58,92,0.3);font-size:12px">
+            <span style="color:var(--text2);min-width:64px">Season ${h.season}</span>
+            <span style="font-weight:700;color:#f97316">🟠 ${h.uelWinner}</span>
+          </div>`;
+        });
+      }
+      // Super Cup winners
+      const scWins = seasons.filter(h => h.superCupWinner);
+      if (scWins.length) {
+        html += `<div class="divider"></div><div class="section-title" style="color:var(--purple)">⭐ Super Cup Winners</div>`;
+        const scCount = {};
+        scWins.forEach(h => { scCount[h.superCupWinner] = (scCount[h.superCupWinner] || 0) + 1; });
+        const scSorted = Object.entries(scCount).sort((a,b) => b[1]-a[1]);
+        html += `<div class="card" style="border-color:#8b5cf644;margin-bottom:12px">`;
+        scSorted.forEach(([name, count], i) => {
+          html += `<div class="leaderboard-item">
+            <div class="leaderboard-rank ${i < 3 ? 'top' : ''}">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i+1}</div>
+            <div style="flex:1;font-size:13px;font-weight:600">${name}</div>
+            <div style="font-size:14px;font-weight:900;color:var(--purple)">${count}x ⭐</div>
+          </div>`;
+        });
+        html += `</div>`;
+      }
+    }
     cont.innerHTML = html;
   }
 }
